@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conquer Map | Your position, at a glance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root {
+      --ink: #17211b;
+      --muted: #69756e;
+      --paper: #f4f1e8;
+      --panel: rgba(253, 252, 247, 0.96);
+      --line: #d7ddd4;
+      --lime: #ccf168;
+      --orange: #e96742;
+      --shadow: 0 18px 48px rgba(37, 49, 40, 0.16);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Space Grotesk", sans-serif;
+      overflow: hidden;
+    }
+
+    .app-shell { height: 100%; position: relative; }
+    #map { position: absolute; inset: 0; z-index: 0; background: #dce5dc; }
+    #map::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(90deg, rgba(22, 38, 27, 0.1), transparent 30%, transparent 76%, rgba(22, 38, 27, 0.04));
+      z-index: 400;
+    }
+
+    .panel {
+      position: absolute;
+      z-index: 500;
+      top: 24px;
+      left: 24px;
+      width: min(360px, calc(100vw - 48px));
+      padding: 24px;
+      border: 1px solid rgba(255,255,255,.9);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      animation: rise-in .7s ease both;
+    }
+
+    .brand { display: flex; align-items: center; justify-content: space-between; margin-bottom: 48px; }
+    .brand-mark { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; letter-spacing: .03em; }
+    .mark { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; background: var(--ink); color: var(--lime); font-size: 13px; }
+    .eyebrow { color: var(--orange); font-family: "DM Mono", monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+
+    h1 { max-width: 280px; margin: 0 0 12px; font-size: clamp(29px, 4vw, 39px); line-height: .98; letter-spacing: -.05em; }
+    .intro { max-width: 280px; margin: 0 0 25px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+    .location-card { padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.55); }
+    .territory-card { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.55); }
+    .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; font-weight: 600; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 4px rgba(233,103,66,.14); }
+    .status-dot.live { background: #58a95b; box-shadow: 0 0 0 4px rgba(88,169,91,.15); }
+    .status-dot.waiting { background: #d4a539; box-shadow: 0 0 0 4px rgba(212,165,57,.15); }
+    .coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .coord-label { display: block; margin-bottom: 3px; color: var(--muted); font-family: "DM Mono", monospace; font-size: 9px; text-transform: uppercase; }
+    .coord-value { display: block; font-family: "DM Mono", monospace; font-size: 11px; }
+    .territory-heading { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+    .territory-title { font-size: 12px; font-weight: 600; }
+    .territory-count { color: #4a762c; font-family: "DM Mono", monospace; font-size: 10px; }
+    .territory-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .territory-stat-label { display: block; margin-bottom: 3px; color: var(--muted); font-family: "DM Mono", monospace; font-size: 9px; text-transform: uppercase; }
+    .territory-stat-value { display: block; font-family: "DM Mono", monospace; font-size: 11px; }
+
+    .locate-button { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; margin-top: 16px; padding: 13px 15px; border: 0; border-radius: 6px; background: var(--ink); color: white; cursor: pointer; font: 600 12px "Space Grotesk", sans-serif; transition: background .2s, transform .2s; }
+    .locate-button:hover { background: #2b3a31; transform: translateY(-1px); }
+    .locate-button:active { transform: translateY(0); }
+    .locate-button:disabled { cursor: wait; opacity: .7; }
+    .test-button { width: 100%; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; font: 600 11px "Space Grotesk", sans-serif; transition: background .2s, border-color .2s; }
+    .test-button:hover { border-color: var(--ink); background: rgba(204,241,104,.25); }
+    .test-button:disabled { cursor: not-allowed; opacity: .5; }
+    .test-button.active { border-color: var(--orange); background: rgba(233,103,66,.08); color: var(--orange); }
+    .reset-button { width: 100%; margin-top: 7px; padding: 8px 12px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: 500 10px "DM Mono", monospace; text-transform: uppercase; }
+    .reset-button:hover { color: var(--orange); }
+    .crosshair { width: 15px; height: 15px; position: relative; border: 1.5px solid currentColor; border-radius: 50%; }
+    .crosshair::before, .crosshair::after { content: ""; position: absolute; background: currentColor; }
+    .crosshair::before { width: 1px; height: 21px; top: -4px; left: 6px; }
+    .crosshair::after { width: 21px; height: 1px; top: 6px; left: -4px; }
+
+    .map-caption { position: absolute; z-index: 500; right: 24px; bottom: 24px; max-width: 240px; padding: 11px 14px; border-left: 3px solid var(--orange); background: rgba(253,252,247,.88); color: var(--muted); font-size: 11px; line-height: 1.35; box-shadow: 0 8px 24px rgba(37,49,40,.12); backdrop-filter: blur(10px); animation: rise-in .7s .2s ease both; }
+    .leaflet-control-zoom { border: 0 !important; box-shadow: var(--shadow) !important; }
+    .leaflet-control-zoom a { color: var(--ink) !important; border: 0 !important; background: rgba(253,252,247,.94) !important; }
+    .leaflet-control-attribution { background: rgba(253,252,247,.8) !important; }
+
+    .user-marker { width: 22px; height: 22px; border: 3px solid white; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 7px rgba(233,103,66,.2), 0 3px 8px rgba(35,47,38,.3); }
+    @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 600px) {
+      .panel { top: 12px; left: 12px; width: calc(100vw - 24px); padding: 17px; }
+      .brand { margin-bottom: 22px; }
+      h1 { font-size: 31px; }
+      .intro { margin-bottom: 16px; }
+      .map-caption { right: 12px; bottom: 12px; max-width: 190px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <div id="map" aria-label="Interactive map showing your location"></div>
+    <section class="panel" aria-labelledby="page-title">
+      <div class="brand">
+        <div class="brand-mark"><span class="mark">+</span> CONQUER MAP</div>
+        <span class="eyebrow">Live view</span>
+      </div>
+      <p class="eyebrow">Your position</p>
+      <h1>Know where you stand.</h1>
+      <p class="intro">A simple, private map view that centers on you when you are ready.</p>
+      <div class="location-card">
+        <div class="status-row"><span class="status-dot waiting" id="status-dot"></span><span id="status-text">Waiting for location</span></div>
+        <div class="coordinates">
+          <div><span class="coord-label">Latitude</span><span class="coord-value" id="latitude">--</span></div>
+          <div><span class="coord-label">Longitude</span><span class="coord-value" id="longitude">--</span></div>
+          <div><span class="coord-label">Accuracy</span><span class="coord-value" id="accuracy">--</span></div>
+          <div><span class="coord-label">Updated</span><span class="coord-value" id="updated">--</span></div>
+        </div>
+        <button class="locate-button" id="locate-button" type="button"><span class="crosshair"></span> Find my location</button>
+      </div>
+      <div class="territory-card">
+        <div class="territory-heading"><span class="territory-title">Conquered territory</span><span class="territory-count" id="territory-count">0 m</span></div>
+        <div class="territory-stats">
+          <div><span class="territory-stat-label">Walked</span><span class="territory-stat-value" id="walked-distance">0 m</span></div>
+          <div><span class="territory-stat-label">Coverage</span><span class="territory-stat-value">20 m radius</span></div>
+        </div>
+        <button class="test-button" id="simulate-button" type="button" disabled>Test a simulated walk</button>
+        <button class="reset-button" id="reset-button" type="button">Reset conquered territory</button>
+      </div>
+    </section>
+    <div class="map-caption" id="map-caption">Map is ready. Allow location access to place yourself on it.</div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+  <script>
+    const defaultCenter = [40.7128, -74.0060];
+    const map = L.map('map', { zoomControl: false, minZoom: 2 }).setView(defaultCenter, 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const caption = document.getElementById('map-caption');
+    const locateButton = document.getElementById('locate-button');
+    const simulateButton = document.getElementById('simulate-button');
+    const resetButton = document.getElementById('reset-button');
+    let userMarker;
+    let accuracyCircle;
+    let coverageCircle;
+    const coverageRadiusMeters = 20;
+    const maxTrailJumpMeters = 80;
+    const trailStorageKey = 'conquered-territory-trail';
+    const conqueredShape = L.geoJSON(null, { style: { color: '#809c3b', fillColor: '#ccf168', fillOpacity: .3, weight: 2 } }).addTo(map);
+    const trailPoints = JSON.parse(localStorage.getItem(trailStorageKey) || '[]');
+    const trailSegments = [];
+    let lastTrailPoint;
+    let walkedDistanceMeters = 0;
+    let simulationTimer;
+    let simulationIndex = 0;
+    let simulationOrigin;
+    let isSimulating = false;
+    const simulationRoute = [[0, 0], [0, 10], [0, 20], [10, 20], [20, 20], [20, 10], [20, 0], [10, 0], [0, 0], [-10, 0], [-20, 0], [-20, -10], [-20, -20], [-10, -20], [0, -20], [0, -10]];
+
+    const setStatus = (message, state, note) => {
+      statusText.textContent = message;
+      statusDot.className = `status-dot ${state}`;
+      caption.textContent = note;
+    };
+
+    const updateTerritorySummary = () => {
+      const walked = walkedDistanceMeters < 1000 ? `${Math.round(walkedDistanceMeters)} m` : `${(walkedDistanceMeters / 1000).toFixed(2)} km`;
+      document.getElementById('territory-count').textContent = `${trailPoints.length} areas`;
+      document.getElementById('walked-distance').textContent = walked;
+    };
+
+    const offsetPoint = (point, northMeters, eastMeters) => {
+      const latitudeOffset = northMeters / 111320;
+      const longitudeOffset = eastMeters / (111320 * Math.cos(point[0] * Math.PI / 180));
+      return [point[0] + latitudeOffset, point[1] + longitudeOffset];
+    };
+
+    const updateConqueredShape = () => {
+      if (!trailPoints.length) return;
+      const bufferedParts = trailSegments.map((segment) => {
+        const coordinates = segment.map(([latitude, longitude]) => [longitude, latitude]);
+        const path = coordinates.length === 1 ? turf.point(coordinates[0]) : turf.lineString(coordinates);
+        return turf.buffer(path, coverageRadiusMeters, { units: 'meters' });
+      });
+      conqueredShape.clearLayers().addData(turf.featureCollection(bufferedParts));
+    };
+
+    const addConqueredArea = (point, persist = true) => {
+      if (lastTrailPoint && map.distance(point, lastTrailPoint) < 5) return false;
+      const distanceFromLastPoint = lastTrailPoint ? map.distance(point, lastTrailPoint) : 0;
+      if (!lastTrailPoint || distanceFromLastPoint > maxTrailJumpMeters) {
+        trailSegments.push([point]);
+      } else {
+        walkedDistanceMeters += distanceFromLastPoint;
+        trailSegments.at(-1).push(point);
+      }
+      lastTrailPoint = point;
+      trailPoints.push(point);
+      updateConqueredShape();
+      if (persist) localStorage.setItem(trailStorageKey, JSON.stringify(trailPoints));
+      updateTerritorySummary();
+      return true;
+    };
+
+    const savedTrailPoints = [...trailPoints];
+    trailPoints.length = 0;
+    savedTrailPoints.forEach((point) => addConqueredArea(point, false));
+    lastTrailPoint = trailPoints.at(-1);
+    updateTerritorySummary();
+
+    const displayLocation = (position, centerMap = true) => {
+      const { latitude, longitude, accuracy } = position.coords;
+      const point = [latitude, longitude];
+      const icon = L.divIcon({ className: '', html: '<div class="user-marker"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
+      if (!userMarker) {
+        userMarker = L.marker(point, { icon, title: 'Your location' }).addTo(map);
+      } else {
+        userMarker.setLatLng(point);
+      }
+      if (!accuracyCircle) {
+        accuracyCircle = L.circle(point, { radius: accuracy, color: '#e96742', fillColor: '#e96742', fillOpacity: .08, weight: 1 }).addTo(map);
+      } else {
+        accuracyCircle.setLatLng(point).setRadius(accuracy);
+      }
+      if (!coverageCircle) {
+        coverageCircle = L.circle(point, { radius: coverageRadiusMeters, color: '#809c3b', fillColor: '#ccf168', fillOpacity: .25, weight: 2 }).addTo(map);
+      } else {
+        coverageCircle.setLatLng(point);
+      }
+      const expandedTerritory = addConqueredArea(point);
+      if (centerMap) map.flyTo(point, 16, { duration: 1.2 });
+      document.getElementById('latitude').textContent = latitude.toFixed(5);
+      document.getElementById('longitude').textContent = longitude.toFixed(5);
+      document.getElementById('accuracy').textContent = `${Math.round(accuracy)} m`;
+      document.getElementById('updated').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const note = expandedTerritory ? 'Territory secured. Keep walking to expand your conquered area.' : 'Your 20 m coverage radius follows your live position.';
+      setStatus('Location found', 'live', note);
+      locateButton.disabled = false;
+      locateButton.innerHTML = '<span class="crosshair"></span> Recenter on me';
+      simulateButton.disabled = false;
+    };
+
+    const stopSimulation = () => {
+      if (simulationTimer) clearInterval(simulationTimer);
+      simulationTimer = undefined;
+      isSimulating = false;
+      simulateButton.classList.remove('active');
+      simulateButton.textContent = 'Test a simulated walk';
+    };
+
+    const startSimulation = () => {
+      if (!userMarker) return;
+      if (isSimulating) {
+        stopSimulation();
+        setStatus('Location found', 'live', 'Test walk stopped. Live GPS tracking is still ready.');
+        return;
+      }
+      isSimulating = true;
+      simulationIndex = 0;
+      const currentPosition = userMarker.getLatLng();
+      simulationOrigin = [currentPosition.lat, currentPosition.lng];
+      simulateButton.classList.add('active');
+      simulateButton.textContent = 'Stop simulated walk';
+      setStatus('Test walk active', 'live', 'Simulated GPS movement is adding conquered territory.');
+      const tick = () => {
+        const [north, east] = simulationRoute[simulationIndex];
+        const point = offsetPoint(simulationOrigin, north, east);
+        displayLocation({ coords: { latitude: point[0], longitude: point[1], accuracy: 4 } }, false);
+        setStatus('Test walk active', 'live', 'Simulated GPS movement is adding conquered territory.');
+        simulationIndex = (simulationIndex + 1) % simulationRoute.length;
+      };
+      tick();
+      simulationTimer = setInterval(tick, 1000);
+    };
+
+    const resetTerritory = () => {
+      if (isSimulating) stopSimulation();
+      trailPoints.length = 0;
+      trailSegments.length = 0;
+      lastTrailPoint = undefined;
+      walkedDistanceMeters = 0;
+      conqueredShape.clearLayers();
+      localStorage.removeItem(trailStorageKey);
+      updateTerritorySummary();
+      setStatus('Territory reset', 'live', 'The conquered shape and walking history have been cleared.');
+    };
+
+    const locate = () => {
+      if (!navigator.geolocation) {
+        setStatus('Location unavailable', '', 'This browser does not support geolocation.');
+        return;
+      }
+      if (isSimulating) stopSimulation();
+      locateButton.disabled = true;
+      setStatus('Finding you...', 'waiting', 'Requesting your position from the browser.');
+      navigator.geolocation.getCurrentPosition(displayLocation, (error) => {
+        const message = error.code === 1 ? 'Location permission is off' : 'Could not find your location';
+        const note = error.code === 1 ? 'Allow location access in your browser, then try again.' : 'Check your connection or try again in a moment.';
+        setStatus(message, '', note);
+        locateButton.disabled = false;
+      }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+    };
+
+    locateButton.addEventListener('click', locate);
+    simulateButton.addEventListener('click', startSimulation);
+    resetButton.addEventListener('click', resetTerritory);
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition((position) => {
+        if (!isSimulating) displayLocation(position);
+      }, () => {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
+    }
+    locate();
+  </script>
+</body>
+</html>
